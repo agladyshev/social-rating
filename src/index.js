@@ -1,49 +1,75 @@
 const request = require('request-promise-native');
 const cron = require('node-cron');
-const { MongoClient } = require('mongodb');
-// const assert = require('assert');
+const mongo = require('./mongo');
 
-require('dotenv').config();
-
-const uri = `mongodb+srv://${process.env.DB_USER}:${process.env.DB_PASSWORD}${process.env.DB_HOST}/test?retryWrites=true`;
 const uriTwitter = process.env.TWITTER_URI || 'http://localhost:3001';
 const uriYoutube = process.env.YOUTUBE_URI || 'http://localhost:3002';
 const uriTelegram = process.env.TELEGRAM_URI || 'http://localhost:3003';
 
-// Mongo calls
-
-const fetchStats = async () => {
-  // Collect a list of influencers from DB with existing social stats
-  let accounts;
-  try {
-    const client = await MongoClient.connect(uri, { useNewUrlParser: true });
-    const db = client.db(process.env.DB_NAME);
-    const col = db.collection('influencers');
-    accounts = await col.find(
-      {
-        $or: [{ twitter_updated: { $exists: true } },
-          { youtube_updated: { $exists: true } },
-          { tg_updated: { $exists: true } }],
-      },
-    ).toArray();
-    client.close();
-  } catch (e) {
-    console.error(e);
-  }
-  return accounts;
-};
-
-// Logic
-
-const calculateRating = async () => {
-  fetchStats()
-    .then(accounts => console.log(accounts));
-  // console.log(influencers);
+const calculateRating = async (accounts) => {
+  const updatedAccounts = accounts.map((account) => {
+    const updatedAccount = account;
+    const {
+      youtube_videos_status,
+      youtube_videos_recent,
+      youtube_likes_recent,
+      youtube_comments_recent,
+      youtube_favorites_recent,
+      youtube_dislikes_recent,
+      youtube_views_recent,
+      youtube_subscribers,
+      twitter_status,
+      twitter_favorites_recent,
+      twitter_retweets_recent,
+      tweets_recent,
+      twitter_followers,
+      tg_channel_status,
+      tg_channel_subscribers,
+      tg_channel_err,
+      tg_group_status,
+      tg_group_posts_per_day,
+      tg_group_subscribers,
+    } = updatedAccount || {};
+    if ((youtube_videos_status === 'OK') && youtube_videos_recent) {
+      updatedAccount.youtubeRecentEngagement = (
+        parseInt(youtube_likes_recent, 10)
+        + parseInt(youtube_comments_recent, 10)
+        + parseInt(youtube_favorites_recent, 10)
+        + parseInt(youtube_dislikes_recent, 10)
+      ) / parseInt(youtube_views_recent, 10);
+      updatedAccount.youtubeSubscribersCorrected = Math.round(parseInt(youtube_subscribers, 10)
+      * (1 + process.env.YOUTUBE_MULTI * updatedAccount.youtubeRecentEngagement));
+    }
+    if ((twitter_status === 'OK') && tweets_recent && twitter_followers) {
+      updatedAccount.twitterRecentEngagement = (
+        parseInt(twitter_favorites_recent, 10)
+        + parseInt(twitter_retweets_recent, 10)
+      ) / (parseInt(tweets_recent, 10)
+          * parseInt(twitter_followers, 10));
+      updatedAccount.twitterFollowersCorrected = Math.round(parseInt(twitter_followers, 10)
+      * (1 + process.env.TWITTER_MULTI * updatedAccount.twitterRecentEngagement));
+    }
+    if (tg_channel_status === 'OK' && tg_channel_subscribers && ((tg_channel_err) !== 'N/A')) {
+      updatedAccount.tgChannelSubscribersCorrected = Math.round(parseInt(tg_channel_subscribers, 10)
+      * (1 + parseFloat(tg_channel_err) / 100));
+    }
+    if (tg_group_status === 'OK' && tg_group_subscribers && tg_group_posts_per_day) {
+      updatedAccount.tgGroupSubscribersCorrected = parseInt(tg_group_subscribers, 10)
+      + process.env.GROUP_MULTI * parseInt(tg_group_posts_per_day, 10);
+    }
+    updatedAccount.totalSubscribersCorrected = (
+      updatedAccount.youtubeSubscribersCorrected || parseInt(youtube_subscribers, 10) || 0)
+    + (updatedAccount.twitterFollowersCorrected || parseInt(twitter_followers, 10) || 0)
+    + (updatedAccount.tgChannelSubscribersCorrected || parseInt(tg_channel_subscribers, 10) || 0)
+    + (updatedAccount.tgGroupSubscribersCorrected || parseInt(tg_group_subscribers, 10) || 0);
+    return updatedAccount;
+  });
+  return updatedAccounts;
 };
 
 // Cron tasks
 
-cron.schedule('59 * * * *', () => {
+// cron.schedule('59 * * * *', () => {
   // Update social statistics every hour
   const services = {
     twitter: request(uriTwitter),
@@ -63,10 +89,11 @@ cron.schedule('59 * * * *', () => {
       });
       if (!failedServices.length) {
         failedServices.forEach(service => console.log(`${service} service failed`));
-      } else {
-      // If all services return OK, calculate social rating
-        calculateRating();
       }
     })
+    .then(() => mongo.fetchStats())
+    .then(accounts => calculateRating(accounts))
+    .then(accounts => accounts.map(mongo.updateRating))
     .catch(err => console.log(err));
-});
+
+// });
