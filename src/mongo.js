@@ -34,12 +34,22 @@ const updateRating = async (account) => {
     const col = db.collection(process.env.DB_COLLECTION);
     const {
       _id,
+      twitterFollowersCorrected,
+      youtubeSubscribersCorrected,
+      tgGroupSubscribersCorrected,
+      tgChannelSubscribersCorrected,
+      tgRating,
       totalSubscribersCorrected,
     } = account || {};
     col.updateOne(
       { _id }, {
         $set: {
+          twitter_followers_corrected: twitterFollowersCorrected,
+          tg_group_subscribers_corrected: tgGroupSubscribersCorrected,
+          tg_channel_subscribers_corrected: tgChannelSubscribersCorrected,
+          youtube_subscribers_corrected: youtubeSubscribersCorrected,
           total_subscribers_corrected: totalSubscribersCorrected,
+          tg_rating: tgRating,
           rating_updated: Date.now(),
         },
       }, (err, result) => {

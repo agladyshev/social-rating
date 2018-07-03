@@ -57,11 +57,13 @@ const calculateRating = async (accounts) => {
       updatedAccount.tgGroupSubscribersCorrected = parseInt(tg_group_subscribers, 10)
       + process.env.GROUP_MULTI * parseInt(tg_group_posts_per_day, 10);
     }
+    updatedAccount.tgRating = (
+      updatedAccount.tgChannelSubscribersCorrected || parseInt(tg_channel_subscribers, 10) || 0)
+    + (updatedAccount.tgGroupSubscribersCorrected || parseInt(tg_group_subscribers, 10) || 0);
     updatedAccount.totalSubscribersCorrected = (
       updatedAccount.youtubeSubscribersCorrected || parseInt(youtube_subscribers, 10) || 0)
     + (updatedAccount.twitterFollowersCorrected || parseInt(twitter_followers, 10) || 0)
-    + (updatedAccount.tgChannelSubscribersCorrected || parseInt(tg_channel_subscribers, 10) || 0)
-    + (updatedAccount.tgGroupSubscribersCorrected || parseInt(tg_group_subscribers, 10) || 0);
+    + updatedAccount.tgRating;
     return updatedAccount;
   });
   return updatedAccounts;
@@ -69,7 +71,7 @@ const calculateRating = async (accounts) => {
 
 // Cron tasks
 
-// cron.schedule('59 * * * *', () => {
+cron.schedule('59 * * * *', () => {
   // Update social statistics every hour
   const services = {
     twitter: request(uriTwitter),
@@ -95,5 +97,4 @@ const calculateRating = async (accounts) => {
     .then(accounts => calculateRating(accounts))
     .then(accounts => accounts.map(mongo.updateRating))
     .catch(err => console.log(err));
-
-// });
+});
