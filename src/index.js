@@ -1,6 +1,13 @@
+require("dotenv").config();
 const request = require("request-promise-native");
 const cron = require("node-cron");
 const mongo = require("./mongo");
+const express = require("express");
+
+const cors = require("cors");
+
+const app = express();
+const port = process.env.PORT || 3000;
 
 const uriTwitter = process.env.TWITTER_URI || "http://localhost:3001";
 const uriYoutube = process.env.YOUTUBE_URI || "http://localhost:3002";
@@ -95,32 +102,46 @@ const calculateRating = async accounts => {
 
 // Cron tasks
 
-cron.schedule("59 * * * *", () => {
-  // Update social statistics every hour
+const updateRating = function() {
   const services = {
     twitter: request(uriTwitter),
     youtube: request(uriYoutube),
     telegram: request(uriTelegram)
   };
-  Promise.all(Object.values(services))
-    // Start parallel async tasks to update stats
-    // Proceed when all tasks done
-    .then(statuses => {
-      // Log if any of services fails
-      const failedServices = statuses.reduce((failed, status, index) => {
-        if (status !== "OK") {
-          failed.push(Object.keys(services)[index]);
+  return (
+    Promise.all(Object.values(services))
+      // Start parallel async tasks to update stats
+      // Proceed when all tasks done
+      .then(statuses => {
+        // Log if any of services fails
+        const failedServices = statuses.reduce((failed, status, index) => {
+          if (status !== "OK") {
+            failed.push(Object.keys(services)[index]);
+          }
+          return failed;
+        });
+        if (!failedServices.length) {
+          failedServices.forEach(service =>
+            console.log(`${service} service failed`)
+          );
         }
-        return failed;
-      });
-      if (!failedServices.length) {
-        failedServices.forEach(service =>
-          console.log(`${service} service failed`)
-        );
-      }
-    })
-    .then(() => mongo.fetchStats())
-    .then(accounts => calculateRating(accounts))
-    .then(accounts => accounts.map(mongo.updateRating))
-    .catch(err => console.log(err));
+      })
+      .then(() => mongo.fetchStats())
+      .then(accounts => calculateRating(accounts))
+      .then(accounts => accounts.map(mongo.updateRating))
+      .catch(err => console.log(err))
+  );
+};
+
+cron.schedule("59 * * * *", () => {
+  // Update social statistics every hour
+  updateRating();
 });
+
+app.get("/", function(req, res, next) {
+  updateRating()
+    .then(result => res.status(200).send("success"))
+    .catch(err => res.status(500).send(err));
+});
+
+app.listen(port, () => console.log(`Listening`));
